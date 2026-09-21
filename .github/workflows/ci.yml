@@ -1,0 +1,60 @@
+name: OPT_CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+  checks: write
+
+env:
+  NODE_VERSION: "24"
+  JAVA_VERSION: "21"
+
+jobs:
+  tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        if: ${{ hashFiles('package.json') != '' }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Set up Java
+        if: ${{ hashFiles('build.gradle') != '' }}
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: gradle
+
+      - name: Make the test script executable
+        run: chmod +x run-tests.sh
+
+      - name: Run unit tests
+        run: ./run-tests.sh
+
+      - name: Publish JUnit test report
+        if: ${{ !cancelled() && hashFiles('test-results/**/*.xml') != '' }}
+        uses: mikepenz/action-junit-report@v6
+        with:
+          report_paths: test-results/**/*.xml
+          fail_on_failure: false
+
+      - name: Upload JUnit files
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results
+          path: test-results/**/*.xml
+          if-no-files-found: warn
