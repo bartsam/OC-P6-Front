@@ -1,4 +1,4 @@
-name: OPT_CI
+name: OPT CI Pipeline
 
 on:
   pull_request:
@@ -8,23 +8,24 @@ on:
     branches:
       - main
 
-permissions:
-  contents: read
-  checks: write
-
 env:
   NODE_VERSION: "24"
   JAVA_VERSION: "21"
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   tests:
-    name: Unit tests
+    name: Run Tests & Generate Report
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
+      checks: write
 
     steps:
-      - name: Check repository
-        uses: actions/checkout@v6
+      - name: Check out the repository
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
         if: ${{ hashFiles('package.json') != '' }}
@@ -42,11 +43,8 @@ jobs:
           java-version: ${{ env.JAVA_VERSION }}
           cache: gradle
 
-      - name: Make the test script executable
-        run: chmod +x run-tests.sh
-
       - name: Run unit tests
-        run: ./run-tests.sh
+        run: bash ./run-tests.sh
 
       - name: Publish JUnit test report
         if: ${{ !cancelled() && hashFiles('test-results/**/*.xml') != '' }}
@@ -62,3 +60,52 @@ jobs:
           name: test-results
           path: test-results/**/*.xml
           if-no-files-found: warn
+
+  build:
+    name: Build and publish Docker image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: tests
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Log in to the Container registry
+        if: ${{ github.event_name == 'push' }}
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix={{branch}}-,format=short,enable=${{ github.event_name == 'push' }}
+            type=sha,prefix=pr-,format=short,enable=${{ github.event_name == 'pull_request' }}
+
+      - name: Build and push Docker image
+        id: push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Generate artifact attestation
+        if: ${{ github.event_name == 'push' }}
+        uses: actions/attest@v4
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME}}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
