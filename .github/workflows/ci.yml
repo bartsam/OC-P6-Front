@@ -90,7 +90,8 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=sha,prefix=sha-,format=short
+            type=sha,prefix={{branch}}-,format=short,enable=${{ github.event_name == 'push' }}
+            type=sha,prefix=pr-,format=short,enable=${{ github.event_name == 'pull_request' }}
 
       - name: Build and push Docker image
         id: push
